@@ -1,7 +1,7 @@
 module Main where
+
 import System.Environment (getArgs)
-import Lib (encryptTextInImage, decryptTextFromImage,
-            saveBiographyFragment)
+import Lib (encryptTextInImage, decryptTextFromImage, saveBiographyFragment)
 
 main :: IO ()
 main = do
@@ -12,10 +12,9 @@ main = do
             saveBiographyFragment "biography1000.txt" text
             let bits = read bitsStr :: Int
             encryptTextInImage imgPath text key bits
-            putStrLn "Шифрование готово"
+            putStrLn "Шифрование завершено."
         ["decrypt", imgPath] -> do
             decryptTextFromImage imgPath
-            putStrLn "Расшифровка завершена. Текст сохранен в txt"
         _ -> putStrLn "Выберите: \n\
                       \ Для шифрования: encrypt \
                       \ \n\

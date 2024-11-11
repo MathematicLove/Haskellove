@@ -1,11 +1,11 @@
-module Lib (encryptTextInImage, decryptTextFromImage, saveBiographyFragment, encryptTextWithBits) where
+module Lib (encryptTextInImage, decryptTextFromImage, saveBiographyFragment) where
+
 import Codec.Picture
 import Data.Bits
 import Data.Char (ord, chr)
-import Data.List (foldl', isSuffixOf)
+import Data.List (foldl', nub)
 import Data.List.Split (splitOn)
 import System.FilePath (takeBaseName, takeFileName)
-import Data.List (foldl', isSuffixOf, elemIndex)
 import qualified Data.Vector.Unboxed as VU
 
 saveBiographyFragment :: FilePath -> String -> IO ()
@@ -18,6 +18,29 @@ saveBiographyFragment path content = do
     if length finalFragment < 1000
       then putStrLn "Ошибка: текст для биографии < 1000"
       else writeFile path finalFragment
+originalAlphabet :: [Char]
+originalAlphabet = ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9']
+hasDuplicates :: Eq a => [a] -> Bool
+hasDuplicates xs = length xs /= length (nub xs)
+generateSubstitutionAlphabet :: String -> Either String [Char]
+generateSubstitutionAlphabet codeWord =
+    if hasDuplicates codeWord
+    then Left "Ошибка!! Символы должны отличаться((((("
+    else Right (codeWord ++ [c | c <- originalAlphabet, c `notElem` codeWord])
+
+encodeText :: String -> String -> Either String String
+encodeText codeWord text = do
+    subAlphabet <- generateSubstitutionAlphabet codeWord
+    let alphabet = originalAlphabet
+    Right [encodeChar c alphabet subAlphabet | c <- text]
+
+
+
+encodeChar :: Char -> [Char] -> [Char] -> Char
+encodeChar c alphabet subAlphabet =
+    case lookup c (zip alphabet subAlphabet) of
+        Just c' -> c'
+        Nothing -> c  
 
 
 encodeBits :: Char -> [Int]
@@ -31,15 +54,15 @@ clearMask n = complement (setMask n)
 modifyBits :: Int -> Pixel8 -> Int -> Pixel8
 modifyBits n originalByte bits =
     (originalByte .&. clearMask n) .|. (fromIntegral bits .&. setMask n)
-
-encryptTextWithBits :: Int -> Image PixelRGB8 -> String -> String -> Image PixelRGB8
-encryptTextWithBits n img text key = generateImage encoder width height
+encodeLength :: Int -> [Int]
+encodeLength len = [ if testBit len i then 1 else 0 | i <- [31,30..0] ]
+encryptBitsToImage :: Int -> Image PixelRGB8 -> [Int] -> Image PixelRGB8
+encryptBitsToImage n img bitsData = generateImage encoder width height
   where
     width = imageWidth img
     height = imageHeight img
-    combinedBits = concatMap encodeBits (text ++ key)
     totalBits = width * height * 3 * n
-    bitsPaddedList = take totalBits (combinedBits ++ repeat 0)
+    bitsPaddedList = take totalBits (bitsData ++ repeat 0)
     bitsPadded = VU.fromList bitsPaddedList
     encoder x y =
       let index = x + y * width
@@ -63,21 +86,30 @@ encryptTextInImage imgPath text key bits = do
         Left err -> putStrLn $ "Ошибка изображения: " ++ err
         Right dynImg -> do
             putStrLn "Изображение прочитано"
-            let img = convertRGB8 dynImg
-                width = imageWidth img
-                height = imageHeight img
-                totalPixels = width * height
-                totalBitsAvailable = totalPixels * 3 * bits
-                maxChars = totalBitsAvailable `div` 8
-                textWithKey = text ++ key
-            if length textWithKey > maxChars
-                then putStrLn $ "Ошибка: текст слишком длинный( " ++ show maxChars
-                else do
-                    let encodedImg = encryptTextWithBits bits img text key
-                        outputPath = takeBaseName imgPath ++ "_encrypted_" ++ key ++ "_" ++ show bits ++ "bits.bmp"
-                    putStrLn $ "Сохранение зашифрованного bmp: " ++ outputPath
-                    saveBmpImage outputPath (ImageRGB8 encodedImg)
-                    putStrLn "Зашифрованный файл сохранен"
+            case encodeText key text of
+                Left errMsg -> putStrLn errMsg
+                Right encodedText -> do
+                    let outputTextPath = "encrypted_image_text_" ++ key ++ ".txt"
+                    writeFile outputTextPath encodedText
+                    putStrLn $ "Зашифрованный текст сохранен в " ++ outputTextPath
+                    let img = convertRGB8 dynImg
+                        width = imageWidth img
+                        height = imageHeight img
+                        totalPixels = width * height
+                        totalBitsAvailable = totalPixels * 3 * bits
+                        maxChars = (totalBitsAvailable - 32) `div` 8
+                    if length encodedText > maxChars
+                        then putStrLn $ "Ошибка: текст слишком длинный (максимум " ++ show maxChars ++ " символов)"
+                        else do
+                            let messageLength = length encodedText
+                            let lengthBits = encodeLength messageLength
+                            let messageBits = concatMap encodeBits encodedText
+                            let allBits = lengthBits ++ messageBits
+                            let encodedImg = encryptBitsToImage bits img allBits
+                            let outputImgPath = takeBaseName imgPath ++ "_encrypted_" ++ key ++ "_" ++ show bits ++ "bits.bmp"
+                            putStrLn $ "Сохранение зашифрованного bmp: " ++ outputImgPath
+                            saveBmpImage outputImgPath (ImageRGB8 encodedImg)
+                            putStrLn "Зашифрованный файл сохранен"
 
 extractBitsFromPixel :: Int -> PixelRGB8 -> [Int]
 extractBitsFromPixel n (PixelRGB8 r g b) =
@@ -86,55 +118,40 @@ extractBitsFromPixel n (PixelRGB8 r g b) =
         bitsB = [ if testBit b i then 1 else 0 | i <- [(n - 1),(n - 2)..0] ]
     in bitsR ++ bitsG ++ bitsB
 
-decodeChar :: [Int] -> Char
-decodeChar bits = chr $ bitsToInt bits
+decodeText :: String -> String -> Either String String
+decodeText codeWord text = do
+    subAlphabet <- generateSubstitutionAlphabet codeWord
+    let alphabet = originalAlphabet
+    Right [decodeChar c alphabet subAlphabet | c <- text]
+decodeChar :: Char -> [Char] -> [Char] -> Char
+decodeChar c alphabet subAlphabet =
+    case lookup c (zip subAlphabet alphabet) of
+        Just c' -> c'
+        Nothing -> c   
 
-decodeTextFromImage :: Image PixelRGB8 -> String -> Int -> String
-decodeTextFromImage img key bits = decodeChars bitsStreamLimited "" key keyLength
+decodeCharFromBits :: [Int] -> Char
+decodeCharFromBits bits = chr $ bitsToInt bits
+bitsToChars :: [Int] -> String
+bitsToChars bits = [ decodeCharFromBits (take 8 (drop (i * 8) bits)) | i <- [0 .. (length bits `div` 8) - 1] ]
+
+decodeTextFromImage :: Image PixelRGB8 -> Int -> String
+decodeTextFromImage img bits = decodedMessage
   where
     width = imageWidth img
     height = imageHeight img
-    keyLength = length key
-    maxChars = 1000 + keyLength
-    pixels = [ pixelAt img x y | y <- [0..height - 1], x <- [0..width - 1] ]
+    pixels = [ pixelAt img x y | y <- [0..height -1], x <- [0..width -1 ] ]
     extractedBits = concatMap (extractBitsFromPixel bits) pixels
-    bitsStreamLimited = take (maxChars * 8 * 2) extractedBits   
-
-decodeChars :: [Int] -> String -> String -> Int -> String
-decodeChars bitsLeft decodedText key keyLength
-  | length decodedText >= keyLength && key `isSuffixOf` decodedText =
-      let truncatedText = take (length decodedText - keyLength) decodedText
-          lastFullStopIndex = findLastFullStop truncatedText
-      in if lastFullStopIndex /= -1
-         then take (lastFullStopIndex + 1) truncatedText
-         else truncatedText
-  | length bitsLeft < 8 = decodedText
-  | otherwise =
-      let (charBits, restBits) = splitAt 8 bitsLeft
-          c = decodeChar charBits
-      in decodeChars restBits (decodedText ++ [c]) key keyLength
-
-findLastFullStop :: String -> Int
-findLastFullStop txt =
-  let (initialPart, remainingPart) = splitAt 1000 txt
-  in case elemIndex '.' remainingPart of
-       Just idx -> 1000 + idx
-       Nothing  -> -1
-
-findIndexRev :: (a -> Bool) -> [a] -> Maybe Int
-findIndexRev p xs = go (reverse xs) (length xs - 1)
-  where
-    go [] _ = Nothing
-    go (y:ys) idx
-      | p y       = Just idx
-      | otherwise = go ys (idx - 1)
+    (lengthBits, restBits) = splitAt 32 extractedBits
+    messageLength = bitsToInt lengthBits
+    messageBits = take (messageLength * 8) restBits
+    decodedMessage = bitsToChars messageBits
 
 decryptTextFromImage :: FilePath -> IO ()
 decryptTextFromImage imgPath = do
     let fileName = takeFileName imgPath
         parts = splitOn "_" fileName
-        key = if length parts >= 3 then parts !! 2 else error "Ключ не тот"
-        bitsStr = if length parts >= 4 then parts !! 3 else error "Количество битов нет"
+        key = if length parts >= 3 then parts !! 2 else error "Ключ не найден в имени файла"
+        bitsStr = if length parts >= 4 then parts !! 3 else error "Количество битов не указано"
         bits = read (filter (`elem` ['0'..'9']) bitsStr) :: Int
     putStrLn $ "Ключ: " ++ key
     putStrLn $ "Количество битов: " ++ show bits
@@ -144,7 +161,10 @@ decryptTextFromImage imgPath = do
         Right dynImg -> do
             putStrLn "Изображение готово"
             let img = convertRGB8 dynImg
-                decodedText = decodeTextFromImage img key bits
-                outputPath = takeBaseName imgPath ++ "_decrypted.txt"
-            writeFile outputPath decodedText
-            putStrLn $ "Расшифровка готова, текст сохранен в " ++ outputPath
+                decodedText = decodeTextFromImage img bits
+            case decodeText key decodedText of
+                Left errMsg -> putStrLn errMsg
+                Right finalText -> do
+                    let outputPath = takeBaseName imgPath ++ "_decrypted.txt"
+                    writeFile outputPath finalText
+                    putStrLn $ "Расшифровка готова, текст сохранен в " ++ outputPath
