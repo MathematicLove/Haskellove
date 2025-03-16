@@ -23,7 +23,7 @@ jobs:
     - name: Create cabal.project file
       run: |
         if [ ! -f cabal.project ]; then
-          echo "packages: **/*.cabal" > cabal.project
+          echo "packages: *.cabal" > cabal.project
         fi
 
     - name: Cache
