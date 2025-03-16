@@ -1,0 +1,4 @@
+*.hs linguist-language=Haskell
+*.lhs linguist-language=Haskell
+*.cabal linguist-language=Haskell
+
