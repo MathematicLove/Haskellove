@@ -17,8 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-haskell@v1
         with:
-          ghc-version: '8.10.3'
-          cabal-version: '3.2'
+          ghc-version: '9.0.1'  # Update to a more recent GHC version
+          cabal-version: '3.4'  # Update to a more recent Cabal version
 
       - name: Create cabal.project file if needed
         run: |
