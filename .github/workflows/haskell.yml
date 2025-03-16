@@ -15,14 +15,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      
-      # Обновляем ghcup, чтобы получить актуальный список версий GHC
-      - name: Upgrade ghcup
-        run: ghcup upgrade || true
-
       - uses: actions/setup-haskell@v1
         with:
-          ghc-version: '9.12.2'
+          ghc-version: '8.10.3'
           cabal-version: '3.2'
 
       - name: Create cabal.project file if needed
